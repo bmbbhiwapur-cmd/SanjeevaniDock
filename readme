@@ -1,0 +1,39 @@
+SanjeevaniDock 🌿
+Rare Disease Phytochemical Docking Platform
+
+SanjeevaniDock is an advanced, full-stack computational chemistry web application built with Streamlit. It bridges traditional Ayurvedic pharmacology with modern structure-based drug discovery pipelines, specifically tailored for screening plant-based phytochemicals against rare and orphan disease protein targets.
+
+Developed by: Ms. Amisha Bilakar & Team
+
+🚀 Key Features
+The application operates in a robust 4-phase computational pipeline:
+
+Phase 1: Baseline Native Docking
+
+Dynamically loads target proteins from the RCSB PDB and ligand metadata from NIH PubChem based on a built-in rare disease database.
+
+Executes automated molecular docking using a built-in AutoDock Vina engine.
+
+Applies memory-safe Universal Force Field (UFF) minimization via RDKit to resolve steric clashes and relax complexes.
+
+Phase 2: Generative Scaffold Structural Redesign
+
+Analyzes the active phytochemical SMILES matrix and categorizes its molecular scaffold.
+
+Utilizes a computational cleaving engine to safely attach new functional fragments (e.g., methylation, epoxidation), generating an optimized derivative library.
+
+Phase 3: ADMET 3.0 Pharmacokinetics Profiling
+
+Evaluates the physiological properties of redesigned molecules.
+
+Calculates Lipinski's Rule of 5 compliance, TPSA, LogP, permeability, and volume.
+
+Generates a mock FTIR vibrational spectrum for structural topology footprints.
+
+Phase 4: Post-Redesign Validation & Master Synthesis
+
+Docks the newly redesigned derivatives back into the target receptor.
+
+Performs a direct thermodynamic side-by-side comparison (Gibbs free energy and UFF delta) to issue a definitive Master Synthesis Verdict.
+
+Exports publication-ready, interactive HTML Research Reports containing 3D models and contact matrices.
