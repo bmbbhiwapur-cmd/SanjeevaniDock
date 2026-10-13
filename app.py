@@ -2,7 +2,6 @@
 # 6. APPLICATION DASHBOARD WORKSPACE (SINGLE PAGE FLOW)
 # =====================================================================
 
-st.set_page_config(page_title="SanjeevaniDock Hub", layout="wide")
 st.title("🌿 SanjeevaniDock - Rare Disease Phytochemical Docking Platform")
 st.markdown("**SanjeevaniDock bridges traditional Ayurvedic pharmacology with modern structure-based drug discovery pipelines targeting rare and orphan diseases.**")
 st.markdown("**Developed by: Ms. Amisha Bilakar & Team**")
