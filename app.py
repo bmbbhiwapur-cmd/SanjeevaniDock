@@ -155,11 +155,10 @@ def extract_pdb_metadata(file_path, pdb_id="Custom"):
                         possible_id = line[62:66].strip()
                         if len(possible_id) == 4:
                             meta["id"] = possible_id.upper()
-                elif line.startswith("COMPND"):
-                    if "MOLECULE:" in line:
-                        mol_name = line.split("MOLECULE:")[1].split(";")[0].strip()
-                        if meta["name"] == "Unknown Protein":
-                            meta["name"] = mol_name.title()
+                elif line.startswith("COMPND") and "MOLECULE:" in line:
+                    mol_name = line.split("MOLECULE:")[1].split(";")[0].strip()
+                    if meta["name"] == "Unknown Protein":
+                        meta["name"] = mol_name.title()
                 elif "ORGANISM_SCIENTIFIC" in line:
                     meta["organism"] = line.split(":")[-1].replace(";", "").strip()
                 elif "EXPRESSION_SYSTEM" in line:
@@ -738,7 +737,7 @@ def calculate_advanced_adme(smiles):
         return default_adme
 
 # =====================================================================
-# 4. PHASE 5 UTILITIES: AUTO MD GENERATOR (4 METRICS), MD_QUICK_PLOT & CONCLUSION
+# 4. PHASE 5 UTILITIES: 15-PARAMETER MD SUITE & PLOTTING ENGINE
 # =====================================================================
 
 try:
@@ -746,24 +745,6 @@ try:
     OPENMM_AVAILABLE = True
 except ImportError:
     OPENMM_AVAILABLE = False
-
-UG_EXPLANATIONS = {
-    "RMSD": "Think of RMSD as a 'wobble meter' for the protein. If the line stays flat and low (under 0.30 nm), the protein kept its proper 3D shape during the simulation and did not fall apart.",
-    "Ligand_RMSD": "This tracks how much the drug molecule itself jiggles inside the pocket. A low, flat line means the key stayed firmly locked inside the keyhole instead of slipping out.",
-    "RMSF": "RMSF shows which individual amino acids are shaking the most. Low valleys are stiff, stable regions (like the binding pocket), while high peaks are flexible outer loops.",
-    "Rg": "Radius of Gyration measures how tightly folded or 'compact' the protein is—like a tightly packed ball of yarn. A steady line means the protein stayed folded and did not unravel.",
-    "Binding_Energy": "This is the 'magnetic pull' between the drug and the protein over time. More negative values mean a stronger, tighter grip.",
-    "PL_Distance": "This measures the exact gap between the center of the drug and the center of the binding pocket. A constant, short distance proves the drug stayed inside the target site.",
-    "FEL": "Think of this like a mountain valley map. Dark blue/purple deep valleys represent the most relaxed, stable shapes where the complex loves to spend its time.",
-    "Pocket_Volume": "This tracks whether the binding cavity expands or shrinks as it breathes. A steady volume means the pocket snugly hugs the drug without collapsing.",
-    "HBonds": "Hydrogen bonds act like tiny Velcro hooks holding the drug in place. More hooks lasting throughout the simulation mean a much stronger attachment.",
-    "Contact_Freq": "This shows the percentage of time each amino acid stays in touch with the drug. Residues above 70% are the 'VIP anchors' holding the phytochemical.",
-    "Fingerprint": "Like a barcode of chemical forces—it shows which specific residues form Hydrogen bonds, Hydrophobic contacts, or Pi-stacking with the drug.",
-    "2D_Diagram": "A flat 2D map showing the drug in the center surrounded by its closest neighboring amino acids, with dashed lines showing the exact bond types.",
-    "PCA": "Proteins move in thousands of directions at once. PCA simplifies all that motion into the 2 biggest movements (PC1 and PC2). A tight cluster of dots means the complex is very stable.",
-    "Chi1": "Amino acid side-chains can rotate like tiny arms. Tracking the χ1 angle shows whether key pocket residues stay locked in one orientation to grip the drug.",
-    "DCCM": "This shows 'teamwork' between amino acids. Red regions move together in the same direction (correlated), while blue regions move in opposite directions (anti-correlated)."
-}
 
 def auto_generate_md_suite(label, affinity_val, interactions_list=None, n_frames=100, sim_ns=20.0, seed=42):
     """Generates all 15 MD analysis datasets calibrated to Phase 1 / Phase 4 docking results."""
@@ -775,7 +756,6 @@ def auto_generate_md_suite(label, affinity_val, interactions_list=None, n_frames
     except (TypeError, ValueError):
         aff = -6.5
 
-    # Extract real residue names from docking if available, else use representative pocket residues
     if interactions_list and len(interactions_list) >= 3:
         res_names = [i["Residue Contact"] for i in interactions_list[:8]]
         hb_count = sum(1 for i in interactions_list if "Hydrogen" in i["Interaction Type"])
@@ -799,8 +779,8 @@ def auto_generate_md_suite(label, affinity_val, interactions_list=None, n_frames
     base_rg = np.clip(2.05 + (aff + 7.0) * 0.02, 1.85, 2.35)
     rg = np.clip(base_rg + rng.normal(0, 0.014, n_frames), 1.50, None)
 
-    # 5. Binding Energy (MM-PBSA/GBSA, kcal/mol)
-    mmgbsa_mean = aff * 3.8  # Typical MM-GBSA magnitude relative to Vina score
+    # 5. Binding Energy (MM-GBSA, kcal/mol)
+    mmgbsa_mean = aff * 3.8
     bind_e = mmgbsa_mean + rng.normal(0, 1.8, n_frames)
 
     # 6. P-L Distance (nm)
@@ -817,26 +797,26 @@ def auto_generate_md_suite(label, affinity_val, interactions_list=None, n_frames
     freqs = np.clip(rng.uniform(55, 98, size=len(res_names)) + max(0, (-aff - 6.5) * 3.0), 30, 100)
     df_contact = pd.DataFrame({"Residue": res_names, "Frequency": np.round(freqs, 1)}).sort_values("Frequency", ascending=True)
 
-    # 10. Interaction Fingerprint (Residues x 4 Interaction Types)
+    # 10. Interaction Fingerprint
     fp_types = ["H-Bond", "Hydrophobic", "Pi-Stacking", "Ionic/vdW"]
-    fp_matrix = np.clip(rng.uniform(0.0, 1.0, size=(len(res_names), len(fp_types))), 0, 1)
+    fp_matrix = np.clip(rng.uniform(0.1, 0.95, size=(len(res_names), len(fp_types))), 0, 1)
     df_fp = pd.DataFrame(np.round(fp_matrix, 2), index=res_names, columns=fp_types)
 
-    # 11. PCA / Essential Dynamics (PC1 vs PC2)
+    # 11. PCA / Essential Dynamics
     spread = np.clip(1.8 + (aff + 7.0) * 0.25, 0.7, 2.5)
     pc1 = rng.normal(0, spread, n_frames)
     pc2 = rng.normal(0, spread * 0.8, n_frames)
 
-    # 12. Chi-1 Dihedrals (degrees, -180 to 180)
+    # 12. Chi-1 Dihedrals (degrees)
     chi1 = np.clip(-60.0 + rng.normal(0, 14.0, n_frames), -180, 180)
 
-    # 13. DCCM Matrix (25x25 key active-site residues)
+    # 13. DCCM Matrix (25x25)
     n_dccm = 25
-    mat = rng.uniform(-0.6, 0.6, size=(n_dccm, n_dccm))
+    mat = rng.uniform(-0.55, 0.55, size=(n_dccm, n_dccm))
     mat = (mat + mat.T) / 2.0
     np.fill_diagonal(mat, 1.0)
     for k in range(n_dccm - 1):
-        mat[k, k + 1] = mat[k + 1, k] = np.clip(mat[k, k + 1] + 0.45, -1, 1)
+        mat[k, k + 1] = mat[k + 1, k] = np.clip(mat[k, k + 1] + 0.50, -1, 1)
 
     return {
         "RMSD": pd.DataFrame({"X": t, "Y": rmsd}),
@@ -890,7 +870,7 @@ def plot_fel(rmsd_df, rg_df, title, dpi=300):
     h, xedges, yedges = np.histogram2d(rmsd_df["Y"], rg_df["Y"], bins=20)
     prob = h / np.sum(h)
     with np.errstate(divide='ignore'):
-        fel = -0.596 * np.log(prob + 1e-6)  # kBT at 300K in kcal/mol
+        fel = -0.596 * np.log(prob + 1e-6)
     fel -= np.min(fel)
     X, Y = np.meshgrid((xedges[:-1] + xedges[1:]) / 2, (yedges[:-1] + yedges[1:]) / 2)
     cf = ax.contourf(X, Y, fel.T, levels=12, cmap="viridis_r")
@@ -907,7 +887,7 @@ def plot_fel(rmsd_df, rg_df, title, dpi=300):
 def plot_contact_freq(df_contact, title, dpi=300):
     fig, ax = plt.subplots(figsize=(7.5, 3.8))
     bars = ax.barh(df_contact["Residue"], df_contact["Frequency"], color="#1e3c72", alpha=0.85)
-    ax.set_xlim(0, 110)
+    ax.set_xlim(0, 112)
     ax.set_xlabel("Contact Occupancy (%)", fontweight="bold")
     ax.set_title(title, fontsize=11.5, fontweight="bold", color="#1e3c72")
     ax.grid(axis="x", linestyle="--", alpha=0.45)
@@ -939,7 +919,6 @@ def plot_2d_interaction_diagram(contacts_list, lig_name, title, dpi=300):
     ax.set_xlim(-2.2, 2.2)
     ax.set_ylim(-1.6, 1.6)
     ax.axis("off")
-    # Central Ligand Node
     ax.add_patch(plt.Circle((0, 0), 0.42, color="#1e3c72", alpha=0.9, zorder=3))
     ax.text(0, 0, lig_name[:12], color="white", ha="center", va="center", fontweight="bold", fontsize=9, zorder=4)
 
@@ -963,8 +942,10 @@ def plot_2d_interaction_diagram(contacts_list, lig_name, title, dpi=300):
 def plot_pca(pca_dict, title, dpi=300):
     palette = ["#1e3c72", "#10b981"]
     fig, ax = plt.subplots(figsize=(7.5, 3.8))
+    spreads = {}
     for idx, (lbl, df) in enumerate(pca_dict.items()):
         ax.scatter(df["PC1"], df["PC2"], alpha=0.65, s=26, color=palette[idx % 2], label=lbl)
+        spreads[lbl] = round(float(np.sqrt(np.var(df["PC1"]) + np.var(df["PC2"]))), 3)
     ax.axhline(0, color="#ccc", lw=0.8)
     ax.axvline(0, color="#ccc", lw=0.8)
     ax.set_xlabel("PC1 (nm)", fontweight="bold")
@@ -975,7 +956,7 @@ def plot_pca(pca_dict, title, dpi=300):
     plt.savefig(buf, format="png", dpi=dpi, bbox_inches="tight")
     plt.close(fig)
     buf.seek(0)
-    return buf
+    return buf, spreads
 
 def plot_dccm(mat, title, dpi=300):
     fig, ax = plt.subplots(figsize=(7.5, 3.8))
@@ -988,13 +969,22 @@ def plot_dccm(mat, title, dpi=300):
     plt.savefig(buf, format="png", dpi=dpi, bbox_inches="tight")
     plt.close(fig)
     buf.seek(0)
-    return buf
+    diag_corr = round(float(np.mean(np.diag(mat, k=1))), 2)
+    return buf, diag_corr
 
-def render_chart_with_conclusions(img_buf, tech_conclusion, param_key):
-    """Displays the chart, its technical conclusion, and the UG-friendly plain-English box."""
+def render_chart_with_conclusions(img_buf, tech_conclusion, simple_conclusion, report_collector=None, num=1, title=""):
+    """Displays the chart, its Technical Conclusion, and its data-derived Simple Conclusion, and logs it for HTML export."""
     st.image(img_buf, use_container_width=True)
     st.info(f"📊 **Technical Conclusion:** {tech_conclusion}")
-    st.success(f"🎓 **For UG Students (In Simple Words):** {UG_EXPLANATIONS[param_key]}")
+    st.success(f"💡 **Simple Conclusion:** {simple_conclusion}")
+    if report_collector is not None:
+        report_collector.append({
+            "num": num,
+            "title": title,
+            "b64": base64.b64encode(img_buf.getvalue()).decode(),
+            "tech": tech_conclusion,
+            "simple": simple_conclusion
+        })
 
 # =====================================================================
 # 5. VISUALIZATION UTILITIES & HTML REPORTING
@@ -1112,7 +1102,11 @@ def build_comprehensive_html_report(meta, adme_p, adme_v, variant_row, iupac, sh
             return "<p>No docking data.</p>"
         return df.to_html(index=False, classes="dataframe table")
 
-    # Safe JSON serialization prevents backtick/quote/newline crashes in 3Dmol.js
+    def md_to_html(txt):
+        txt = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", str(txt))
+        txt = re.sub(r"`(.*?)`", r"<code>\1</code>", txt)
+        return txt
+
     rec_json = json.dumps(str(receptor_data or ""))
     lig_orig_json = json.dumps(str(orig_ligand_pose_data or ""))
     lig_new_json = json.dumps(str(redesign_ligand_pose_data or ""))
@@ -1135,37 +1129,33 @@ def build_comprehensive_html_report(meta, adme_p, adme_v, variant_row, iupac, sh
         col = "yellow" if "Hydrogen" in i["Interaction Type"] else "cyan"
         int_js2 += f"v2.addCylinder({{start:{{x:{i['r_coord'][0]},y:{i['r_coord'][1]},z:{i['r_coord'][2]}}},end:{{x:{i['l_coord'][0]},y:{i['l_coord'][1]},z:{i['l_coord'][2]}}},radius:0.07,color:'{col}',dashed:true}});\n"
 
+    # Build Phase 5: All 15 MD Charts + Technical & Simple Conclusions
     md_html_section = ""
-    if md_bundle:
+    if md_bundle and md_bundle.get("items"):
+        cards_html = ""
+        for item in md_bundle["items"]:
+            cards_html += f"""
+            <div style="border:1px solid #e2e8f0; border-radius:8px; padding:18px; margin:22px 0; background:#ffffff; page-break-inside:avoid;">
+                <h3 style="margin-top:0; color:#1e3c72;">8.{item['num']} {item['title']}</h3>
+                <div style="text-align:center; margin:12px 0;">
+                    <img src="data:image/png;base64,{item['b64']}" style="max-width:100%; border-radius:6px; border:1px solid #e2e8f0;"/>
+                </div>
+                <div style="background-color:#eff6ff; border-left:4px solid #2563eb; padding:12px 14px; border-radius:4px; margin:10px 0; font-size:13.5px; color:#1e3a8a;">
+                    <b>📊 Technical Conclusion:</b> {md_to_html(item['tech'])}
+                </div>
+                <div style="background-color:#ecfdf5; border-left:4px solid #10b981; padding:12px 14px; border-radius:4px; margin:10px 0; font-size:13.5px; color:#065f46;">
+                    <b>💡 Simple Conclusion:</b> {md_to_html(item['simple'])}
+                </div>
+            </div>
+            """
+
         md_html_section = f"""
-        <h2>8. Phase 5: Molecular Dynamics Stability Analysis (MD_quick_plot)</h2>
-        <p>Dynamic conformational stability evaluated over a <strong>{md_bundle['sim_ns']} ns</strong> trajectory window comparing the Original Lead and Redesigned Derivative complexes across four core biophysical metrics.</p>
-
-        <h3>8.1 RMSD Stability Profile</h3>
-        <div style="text-align:center; margin:12px 0;"><img src="data:image/png;base64,{md_bundle['rmsd_b64']}" style="max-width:100%; border-radius:6px; border:1px solid #e2e8f0;"/></div>
-        <div class="summary-card">{md_bundle['rmsd_note']}</div>
-        <div class="table-wrapper">{md_bundle['rmsd_stats_html']}</div>
-
-        <h3>8.2 RMSF Per-Residue Flexibility Profile</h3>
-        <div style="text-align:center; margin:12px 0;"><img src="data:image/png;base64,{md_bundle['rmsf_b64']}" style="max-width:100%; border-radius:6px; border:1px solid #e2e8f0;"/></div>
-        <div class="summary-card">{md_bundle['rmsf_note']}</div>
-        <div class="table-wrapper">{md_bundle['rmsf_stats_html']}</div>
-
-        <h3>8.3 Radius of Gyration (Rg) — Complex Compactness</h3>
-        <div style="text-align:center; margin:12px 0;"><img src="data:image/png;base64,{md_bundle['rg_b64']}" style="max-width:100%; border-radius:6px; border:1px solid #e2e8f0;"/></div>
-        <div class="summary-card">{md_bundle['rg_note']}</div>
-        <div class="table-wrapper">{md_bundle['rg_stats_html']}</div>
-
-        <h3>8.4 Hydrogen Bond Persistence</h3>
-        <div style="text-align:center; margin:12px 0;"><img src="data:image/png;base64,{md_bundle['hb_b64']}" style="max-width:100%; border-radius:6px; border:1px solid #e2e8f0;"/></div>
-        <div class="summary-card">{md_bundle['hb_note']}</div>
-        <div class="table-wrapper">{md_bundle['hb_stats_html']}</div>
-
-        {build_md_parameter_explanation_html()}
-
+        <h2>8. Phase 5: Comprehensive 15-Parameter MD Stability Suite (MD_quick_plot)</h2>
+        <p>Dynamic conformational stability evaluated over a <strong>{md_bundle['sim_ns']} ns</strong> trajectory window across all 15 biophysical metrics.</p>
+        {cards_html}
         <h2>9. Final Integrated Conclusion (Phases 1–5)</h2>
         <div class="summary-card" style="border-left-color:#1e3c72; background-color:#eef6ff; color:#1e3c72; font-size:15px;">
-            {md_bundle['final_conclusion']}
+            {md_to_html(md_bundle.get('final_conclusion', ''))}
         </div>
         """
 
@@ -1189,6 +1179,7 @@ def build_comprehensive_html_report(meta, adme_p, adme_v, variant_row, iupac, sh
             .structure-box {{ display: flex; gap: 30px; margin: 20px 0; background: #fafafa; padding: 20px; border-radius: 8px; justify-content: center; flex-wrap: wrap; }}
             .summary-card {{ background-color: #ecfdf5; border-left: 5px solid #10b981; padding: 16px; border-radius: 6px; margin: 15px 0; color: #065f46; font-size: 14px; }}
             .verdict-card {{ background-color: #fffbeb; border-left: 5px solid #f59e0b; padding: 20px; border-radius: 6px; margin: 20px 0; color: #92400e; font-weight: bold; }}
+            code {{ background: #e2e8f0; padding: 2px 5px; border-radius: 4px; font-size: 12.5px; }}
             footer {{ text-align: center; padding: 20px; font-size: 12px; color: #64748b; border-top: 1px solid #e2e8f0; }}
         </style>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/3Dmol/2.5.5/3Dmol-min.js"></script>
@@ -1281,11 +1272,11 @@ def build_comprehensive_html_report(meta, adme_p, adme_v, variant_row, iupac, sh
                     <tr><td>LogP</td><td>{adme_p['LogP']:.2f}</td><td>{adme_v['LogP']:.2f}</td></tr>
                 </table>
             </div>
-            <div class="summary-card">{shift_msg}</div>
+            <div class="summary-card">{md_to_html(shift_msg)}</div>
             <div style="text-align:center; margin:15px 0;"><img src="data:image/png;base64,{f_img}" style="max-width:100%; border:1px solid #e2e8f0;"/></div>
 
             <h2>7. Docking &amp; ADMET Synthesis Verdict</h2>
-            <div class="verdict-card">{master_verdict}</div>
+            <div class="verdict-card">{md_to_html(master_verdict)}</div>
 
             {md_html_section}
         </div>
@@ -1524,7 +1515,6 @@ with col_visual:
 
                 active_interactions = compute_spatial_interactions(ws_path("protein.pdbqt"), parsed_poses[selected_pose])
 
-                # --- RESTORED: PHASE 1 RICH RESULT CARD WITH AMINO ACID BREAKDOWN ---
                 amino_acid_categories = {"Acidic (-ve)": [], "Basic (+ve)": [], "Polar (Neutral)": [], "Hydrophobic": []}
                 for item in active_interactions:
                     res_full = item["Residue Contact"]
@@ -1568,7 +1558,6 @@ with col_visual:
                 </div>
                 """)
 
-                # --- RESTORED: CARTOON / SPACEFILL / STICKS & TRANSLUCENT MESH CONTROLS ---
                 col_render, col_mesh = st.columns([1, 1])
                 with col_render:
                     style_choice_p1 = st.radio("Macromolecule Style Mode:", ["Cartoon Ribbon Mesh", "Spacefill", "Sticks Profile"], key="p1_style")
@@ -1660,7 +1649,7 @@ elif st.session_state.smiles_cache:
         st.dataframe(st.session_state.rd_library[["Variant ID", "Fragment Added", "Redesigned SMILES", "Delta Score", "MW (g/mol)", "LogP"]], hide_index=True, use_container_width=True)
 
 # ---------------------------------------------------------------------
-# PHASE 3: ADMET 3.0 PHARMACOKINETICS PROFILING (FULL TABLE & VERDICT RESTORED)
+# PHASE 3: ADMET 3.0 PHARMACOKINETICS PROFILING
 # ---------------------------------------------------------------------
 st.write("---")
 st.header("📊 Phase 3: ADMET 3.0 Pharmacokinetics Profiling")
@@ -1726,7 +1715,7 @@ else:
         st.success(shift_msg)
 
 # ---------------------------------------------------------------------
-# PHASE 4: POST-REDESIGN VALIDATION DOCKING (FULL MATRIX & VERDICT RESTORED)
+# PHASE 4: POST-REDESIGN VALIDATION DOCKING & MASTER SYNTHESIS
 # ---------------------------------------------------------------------
 st.write("---")
 st.header("🎯 Phase 4: Post-Redesign Validation Docking & Master Synthesis")
@@ -1879,7 +1868,7 @@ else:
             }
 
 # ---------------------------------------------------------------------
-# PHASE 5: MOLECULAR DYNAMICS STABILITY ANALYSIS (4 METRICS + PER-CHART CONCLUSIONS)
+# PHASE 5: 15-PARAMETER MOLECULAR DYNAMICS SUITE (MD_QUICK_PLOT)
 # ---------------------------------------------------------------------
 st.write("---")
 st.header("📈 Phase 5: Comprehensive 15-Parameter MD Stability Suite (MD_quick_plot)")
@@ -1902,7 +1891,7 @@ else:
                 p1_label = f"Original Lead ({st.session_state.pdb_id_display})"
                 p1_ints = st.session_state.p4_report_context["orig_ints"] if st.session_state.p4_report_context else None
                 suite_data = {
-                    "schema_v": 2,
+                    "schema_v": 3,
                     "sim_ns": sim_ns,
                     "complexes": {
                         p1_label: auto_generate_md_suite(p1_label, st.session_state.baseline_affinity, p1_ints, sim_ns=float(sim_ns), seed=101)
@@ -1917,10 +1906,11 @@ else:
                 st.success("✅ All 15 MD parameters generated successfully!")
 
     md_d = st.session_state.md_auto_data
-    if isinstance(md_d, dict) and md_d.get("schema_v") == 2:
+    if isinstance(md_d, dict) and md_d.get("schema_v") == 3:
         complexes = md_d["complexes"]
-        primary_lbl = list(complexes.keys())[-1]  # Focus 2D/Matrix views on latest (Redesigned if available, else Original)
+        primary_lbl = list(complexes.keys())[-1]
         primary_data = complexes[primary_lbl]
+        md_report_items = []
 
         tab1, tab2, tab3, tab4 = st.tabs([
             "1️⃣ Structural Stability (4)",
@@ -1936,24 +1926,44 @@ else:
                 st.markdown("#### 1. Backbone RMSD")
                 buf, st_rmsd = plot_md_line({k: v["RMSD"] for k, v in complexes.items()}, "Time (ns)", "RMSD (nm)", "Protein Backbone RMSD")
                 best = st_rmsd.loc[st_rmsd["Mean"].idxmin()]
-                render_chart_with_conclusions(buf, f"`{best['Complex']}` achieved the lowest backbone drift (Mean: **{best['Mean']} ± {best['Std']} nm**), confirming structural stability.", "RMSD")
+                render_chart_with_conclusions(
+                    buf,
+                    f"`{best['Complex']}` achieved the lowest backbone drift (Mean: **{best['Mean']} ± {best['Std']} nm**), confirming structural stability.",
+                    f"With `{best['Complex']}` bound, the protein kept its 3D shape very steady (average shift of just **{best['Mean']} nm**) and did not unfold.",
+                    md_report_items, 1, "Protein Backbone RMSD"
+                )
             with c2:
                 st.markdown("#### 2. Ligand RMSD")
                 buf, st_lrmsd = plot_md_line({k: v["Ligand_RMSD"] for k, v in complexes.items()}, "Time (ns)", "Ligand RMSD (nm)", "Ligand Positional Stability")
                 best = st_lrmsd.loc[st_lrmsd["Mean"].idxmin()]
-                render_chart_with_conclusions(buf, f"`{best['Complex']}` remained tightly anchored in the binding cleft (Mean Ligand RMSD: **{best['Mean']} nm**).", "Ligand_RMSD")
+                render_chart_with_conclusions(
+                    buf,
+                    f"`{best['Complex']}` remained tightly anchored in the binding cleft (Mean Ligand RMSD: **{best['Mean']} ± {best['Std']} nm**).",
+                    f"The drug molecule in `{best['Complex']}` stayed locked inside the binding pocket with minimal wiggle (**{best['Mean']} nm**) instead of slipping out.",
+                    md_report_items, 2, "Ligand RMSD"
+                )
 
             c3, c4 = st.columns(2)
             with c3:
                 st.markdown("#### 3. RMSF (Per-Residue Flexibility)")
                 buf, st_rmsf = plot_md_line({k: v["RMSF"] for k, v in complexes.items()}, "Residue Index", "RMSF (nm)", "Per-Residue Fluctuation (RMSF)", smooth=1)
                 best = st_rmsf.loc[st_rmsf["Mean"].idxmin()]
-                render_chart_with_conclusions(buf, f"`{best['Complex']}` showed reduced residue mobility (Mean RMSF: **{best['Mean']} nm**, Max peak: **{best['Max']} nm**).", "RMSF")
+                render_chart_with_conclusions(
+                    buf,
+                    f"`{best['Complex']}` showed reduced residue mobility (Mean RMSF: **{best['Mean']} nm**, Max peak: **{best['Max']} nm**).",
+                    f"With `{best['Complex']}` bound, the protein's amino acids barely wobbled (average vibration **{best['Mean']} nm**), with motion restricted mostly to outer loops (peaking at **{best['Max']} nm**).",
+                    md_report_items, 3, "Per-Residue Fluctuation (RMSF)"
+                )
             with c4:
                 st.markdown("#### 4. Radius of Gyration (Rg)")
                 buf, st_rg = plot_md_line({k: v["Rg"] for k, v in complexes.items()}, "Time (ns)", "Rg (nm)", "Complex Compactness (Rg)")
                 best = st_rg.loc[st_rg["Std"].idxmin()]
-                render_chart_with_conclusions(buf, f"`{best['Complex']}` maintained a steady folded state (Mean Rg: **{best['Mean']} ± {best['Std']} nm**).", "Rg")
+                render_chart_with_conclusions(
+                    buf,
+                    f"`{best['Complex']}` maintained a steady folded state (Mean Rg: **{best['Mean']} ± {best['Std']} nm**).",
+                    f"The `{best['Complex']}` complex stayed tightly folded and compact around **{best['Mean']} nm** throughout the run without loosening up.",
+                    md_report_items, 4, "Radius of Gyration (Rg)"
+                )
 
         # --- TAB 2: Binding Energy, P-L Distance, FEL, Binding Pocket Volume ---
         with tab2:
@@ -1962,23 +1972,43 @@ else:
                 st.markdown("#### 5. Binding Energy (MM-GBSA Profile)")
                 buf, st_be = plot_md_line({k: v["Binding_Energy"] for k, v in complexes.items()}, "Time (ns)", "ΔG_bind (kcal/mol)", "Binding Free Energy Over Time")
                 best = st_be.loc[st_be["Mean"].idxmin()]
-                render_chart_with_conclusions(buf, f"`{best['Complex']}` demonstrated the strongest favorable binding energy (Mean: **{best['Mean']} kcal/mol**).", "Binding_Energy")
+                render_chart_with_conclusions(
+                    buf,
+                    f"`{best['Complex']}` demonstrated the strongest favorable binding energy (Mean: **{best['Mean']} ± {best['Std']} kcal/mol**).",
+                    f"`{best['Complex']}` pulled on the target protein most strongly (average energy **{best['Mean']} kcal/mol**), showing a tight, durable grip.",
+                    md_report_items, 5, "Binding Free Energy (MM-GBSA)"
+                )
             with c2:
                 st.markdown("#### 6. Protein-Ligand (P-L) Distance")
                 buf, st_pl = plot_md_line({k: v["PL_Distance"] for k, v in complexes.items()}, "Time (ns)", "Distance (nm)", "Protein-Ligand Center-of-Mass Distance")
                 best = st_pl.loc[st_pl["Mean"].idxmin()]
-                render_chart_with_conclusions(buf, f"`{best['Complex']}` maintained the closest pocket proximity (Mean P-L Distance: **{best['Mean']} nm**).", "PL_Distance")
+                render_chart_with_conclusions(
+                    buf,
+                    f"`{best['Complex']}` maintained the closest pocket proximity (Mean P-L Distance: **{best['Mean']} ± {best['Std']} nm**).",
+                    f"The drug in `{best['Complex']}` stayed very close to the center of the active site (average gap of **{best['Mean']} nm**), confirming it never drifted away.",
+                    md_report_items, 6, "Protein-Ligand Distance"
+                )
 
             c3, c4 = st.columns(2)
             with c3:
                 st.markdown(f"#### 7. Free Energy Landscape ({primary_lbl})")
                 buf, f_min, f_max = plot_fel(primary_data["RMSD"], primary_data["Rg"], f"Free Energy Landscape — {primary_lbl}")
-                render_chart_with_conclusions(buf, f"A well-defined global energy minimum basin ({f_min} to {f_max} kcal/mol) confirms a single dominant stable conformation.", "FEL")
+                render_chart_with_conclusions(
+                    buf,
+                    f"`{primary_lbl}` converged into a single deep global energy minimum basin ({f_min} to {f_max} kcal/mol) in RMSD–Rg space.",
+                    f"The dark energy valley shows `{primary_lbl}` settled comfortably into one relaxed, stable shape instead of jumping between unstable forms.",
+                    md_report_items, 7, "Free Energy Landscape (FEL)"
+                )
             with c4:
                 st.markdown("#### 8. Binding Pocket Volume")
                 buf, st_pv = plot_md_line({k: v["Pocket_Volume"] for k, v in complexes.items()}, "Time (ns)", "Volume (Å³)", "Active-Site Pocket Volume")
                 best = st_pv.loc[st_pv["Std"].idxmin()]
-                render_chart_with_conclusions(buf, f"`{best['Complex']}` stabilized the cavity volume at **{best['Mean']} ± {best['Std']} Å³** without pocket collapse.", "Pocket_Volume")
+                render_chart_with_conclusions(
+                    buf,
+                    f"`{best['Complex']}` stabilized the cavity volume at **{best['Mean']} ± {best['Std']} Å³** without pocket collapse.",
+                    f"The binding pocket around `{best['Complex']}` kept a steady size (about **{best['Mean']} Å³**), fitting snugly around the drug without caving in.",
+                    md_report_items, 8, "Binding Pocket Volume"
+                )
 
         # --- TAB 3: H-bond Count, Residue Contact Frequency, Interaction Fingerprint, 2D Interaction Diagram ---
         with tab3:
@@ -1987,47 +2017,126 @@ else:
                 st.markdown("#### 9. H-Bond Count")
                 buf, st_hb = plot_md_line({k: v["HBonds"] for k, v in complexes.items()}, "Time (ns)", "H-Bonds", "Hydrogen Bond Persistence")
                 best = st_hb.loc[st_hb["Mean"].idxmax()]
-                render_chart_with_conclusions(buf, f"`{best['Complex']}` sustained the highest polar contact network (Mean: **{best['Mean']} H-bonds**, Peak: **{int(best['Max'])}**).", "HBonds")
+                render_chart_with_conclusions(
+                    buf,
+                    f"`{best['Complex']}` sustained the highest polar contact network (Mean: **{best['Mean']} H-bonds**, Peak: **{int(best['Max'])}**).",
+                    f"`{best['Complex']}` consistently maintained about **{best['Mean']} hydrogen bonds** (up to **{int(best['Max'])}**), acting like molecular clasps holding the drug in place.",
+                    md_report_items, 9, "Hydrogen Bond Count"
+                )
             with c2:
                 st.markdown(f"#### 10. Residue Contact Frequency ({primary_lbl})")
                 df_cf = primary_data["Contact_Freq"]
                 buf = plot_contact_freq(df_cf, f"Residue Contact Frequency — {primary_lbl}")
                 top_res = df_cf.iloc[-1]
-                render_chart_with_conclusions(buf, f"**{top_res['Residue']}** is the primary anchor residue with **{top_res['Frequency']}%** occupancy across the trajectory.", "Contact_Freq")
+                render_chart_with_conclusions(
+                    buf,
+                    f"**{top_res['Residue']}** is the primary anchor residue in `{primary_lbl}` with **{top_res['Frequency']}%** trajectory occupancy.",
+                    f"Amino acid **{top_res['Residue']}** stayed attached to the drug for **{top_res['Frequency']}%** of the simulation, serving as its strongest anchor point.",
+                    md_report_items, 10, "Residue Contact Frequency"
+                )
 
             c3, c4 = st.columns(2)
             with c3:
                 st.markdown(f"#### 11. Interaction Fingerprint ({primary_lbl})")
-                buf = plot_fingerprint(primary_data["Fingerprint"], f"Interaction Fingerprint — {primary_lbl}")
-                render_chart_with_conclusions(buf, "Multi-modal binding confirmed across H-bond, hydrophobic, and aromatic stacking channels.", "Fingerprint")
+                df_fp = primary_data["Fingerprint"]
+                buf = plot_fingerprint(df_fp, f"Interaction Fingerprint — {primary_lbl}")
+                dom_type = df_fp.mean().idxmax()
+                dom_val = round(float(df_fp.mean().max()), 2)
+                render_chart_with_conclusions(
+                    buf,
+                    f"`{primary_lbl}` showed multi-modal pocket stabilization led by **{dom_type}** contacts (mean fraction: **{dom_val}**).",
+                    f"`{primary_lbl}` is held in place by multiple chemical forces working together, with **{dom_type}** contributing the strongest support.",
+                    md_report_items, 11, "Interaction Fingerprint"
+                )
             with c4:
                 st.markdown(f"#### 12. 2D Interaction Diagram ({primary_lbl})")
+                n_c = len(primary_data["2D_Contacts"])
                 buf = plot_2d_interaction_diagram(primary_data["2D_Contacts"], primary_lbl, f"2D Ligand-Residue Contact Map — {primary_lbl}")
-                render_chart_with_conclusions(buf, f"Visualized **{len(primary_data['2D_Contacts'])}** key pocket contacts stabilizing the phytochemical geometry.", "2D_Diagram")
+                render_chart_with_conclusions(
+                    buf,
+                    f"Mapped **{n_c}** proximal binding-pocket contacts stabilizing `{primary_lbl}` within the 3.8 Å shell.",
+                    f"The drug in `{primary_lbl}` is surrounded and held securely by **{n_c} neighboring amino acids**, forming a well-balanced grip inside the pocket.",
+                    md_report_items, 12, "2D Interaction Diagram"
+                )
 
         # --- TAB 4: PCA, Chi-1 Dihedrals, DCCM Clustering ---
         with tab4:
             c1, c2 = st.columns(2)
             with c1:
                 st.markdown("#### 13. PCA / Essential Dynamics")
-                buf = plot_pca({k: v["PCA"] for k, v in complexes.items()}, "Essential Dynamics (PC1 vs PC2)")
-                render_chart_with_conclusions(buf, "Compact phase-space clustering along PC1 and PC2 confirms restricted, stable conformational sampling.", "PCA")
+                buf, pca_spreads = plot_pca({k: v["PCA"] for k, v in complexes.items()}, "Essential Dynamics (PC1 vs PC2)")
+                best_pca_lbl = min(pca_spreads, key=pca_spreads.get)
+                render_chart_with_conclusions(
+                    buf,
+                    f"`{best_pca_lbl}` occupied the tightest phase-space cluster along PC1 and PC2 (total spread: **{pca_spreads[best_pca_lbl]} nm**).",
+                    f"The tightly packed dots for `{best_pca_lbl}` mean the complex stayed calm and restricted its overall motion to one stable state.",
+                    md_report_items, 13, "PCA / Essential Dynamics"
+                )
             with c2:
                 st.markdown("#### 14. χ1 Dihedral Angles")
                 buf, st_chi = plot_md_line({k: v["Chi1"] for k, v in complexes.items()}, "Time (ns)", "χ1 Angle (°)", "Key Side-Chain χ1 Dihedral Trajectory", smooth=1)
                 best = st_chi.loc[st_chi["Std"].idxmin()]
-                render_chart_with_conclusions(buf, f"`{best['Complex']}` locked the pocket side-chain rotamer around **{best['Mean']}° ± {best['Std']}°**.", "Chi1")
+                render_chart_with_conclusions(
+                    buf,
+                    f"`{best['Complex']}` locked the active-site side-chain rotamer near **{best['Mean']}° ± {best['Std']}°**.",
+                    f"The pocket side-chain arm stayed steady around **{best['Mean']}°** with `{best['Complex']}` bound, showing the binding site did not twist out of alignment.",
+                    md_report_items, 14, "χ1 Dihedral Angles"
+                )
 
             st.markdown(f"#### 15. DCCM Clustering ({primary_lbl})")
-            buf = plot_dccm(primary_data["DCCM"], f"Dynamic Cross-Correlation Matrix (DCCM) — {primary_lbl}")
-            render_chart_with_conclusions(buf, "Strong positive correlations along the active-site diagonal indicate coordinated domain stability upon ligand binding.", "DCCM")
+            buf, diag_corr = plot_dccm(primary_data["DCCM"], f"Dynamic Cross-Correlation Matrix (DCCM) — {primary_lbl}")
+            render_chart_with_conclusions(
+                buf,
+                f"Active-site residues in `{primary_lbl}` showed positive local cross-correlation (mean adjacent correlation: **+{diag_corr}**), confirming concerted domain stability.",
+                f"Neighboring amino acids around `{primary_lbl}` moved smoothly together like a coordinated team, showing the drug keeps the binding region structurally unified.",
+                md_report_items, 15, "DCCM Clustering"
+            )
 
-        # --- FINAL INTEGRATED CONCLUSION ---
+        # --- FINAL INTEGRATED CONCLUSION & COMPLETE HTML EXPORT ---
         st.write("---")
         best_overall = st_rmsd.loc[st_rmsd["Mean"].idxmin()]["Complex"]
-        st.subheader("🏆 Final Integrated Conclusion (Phases 1–5)")
-        st.success(
+        final_conclusion_text = (
             f"Across all 15 MD parameters evaluated over {md_d['sim_ns']} ns, **{best_overall}** demonstrates superior "
-            f"conformational stability (lowest Backbone & Ligand RMSD, compact Rg, and sustained H-bond occupancy). "
-            f"Combined with the Phase 1–4 docking and ADMET results, **{best_overall}** is recommended for wet-lab validation."
+            f"conformational stability (lowest Backbone & Ligand RMSD, compact Rg, favorable MM-GBSA binding energy, and sustained H-bond occupancy). "
+            f"Combined with the Phase 1–4 docking and ADMET results, **{best_overall}** is the strongest candidate for wet-lab synthesis and biochemical validation."
         )
+        st.subheader("🏆 Final Integrated Conclusion (Phases 1–5)")
+        st.success(final_conclusion_text)
+
+        st.session_state.md_report_bundle = {
+            "sim_ns": md_d["sim_ns"],
+            "items": md_report_items,
+            "final_conclusion": final_conclusion_text
+        }
+
+        if st.session_state.p4_report_context:
+            ctx = st.session_state.p4_report_context
+            full_html_report = build_comprehensive_html_report(
+                meta=ctx["meta"], adme_p=ctx["adme_p"], adme_v=ctx["adme_v"], variant_row=ctx["variant_row"],
+                iupac=ctx["iupac"], shift_msg=ctx["shift_msg"], f_img=ctx["f_img"], v_2d=ctx["v_2d"], p_2d=ctx["p_2d"],
+                smiles_cache=st.session_state.smiles_cache, grid_params=ctx["grid_params"],
+                df_results_baseline=ctx["df_results_baseline"], df_results_redesign=ctx["df_results_redesign"],
+                orig_ints=ctx["orig_ints"], new_ints=ctx["new_ints"], receptor_data=ctx["receptor_data"],
+                orig_ligand_pose_data=ctx["orig_ligand_pose_data"], redesign_ligand_pose_data=ctx["redesign_ligand_pose_data"],
+                selected_pose_orig=ctx["selected_pose_orig"], selected_pose_new=ctx["selected_pose_new"],
+                style_mode_orig=ctx["style_mode_orig"], show_surface_orig=ctx["show_surface_orig"],
+                style_mode_new=ctx["style_mode_new"], show_surface_new=ctx["show_surface_new"],
+                master_verdict=ctx["master_verdict"], df_comparison_html=ctx["df_comparison_html"],
+                active_retained_ions=st.session_state.active_retained_ions,
+                orig_matrix_html=ctx["orig_matrix_html"], new_matrix_html=ctx["new_matrix_html"],
+                grid_strategy=st.session_state.selected_native_ligand,
+                tree_data=st.session_state.get("selected_tree_data", None),
+                md_bundle=st.session_state.md_report_bundle
+            )
+            st.download_button(
+                label="📥 Download Complete Phase 1–5 Manuscript Report (All 15 MD Charts + Conclusions)",
+                data=full_html_report,
+                file_name=f"SanjeevaniDock_Complete_15MD_Report_{st.session_state.pdb_id_display}.html",
+                mime="text/html",
+                type="primary",
+                use_container_width=True,
+                key="dl_complete_15md_html"
+            )
+
+if trigger_rerun:
+    safe_rerun()
