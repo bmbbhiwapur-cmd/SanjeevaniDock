@@ -1070,6 +1070,7 @@ def render_advanced_modeling_blueprint(receptor_data, ligand_data, mode="cartoon
     """
     components.html(html_content, height=510)
 
+# --- RESTORED FULL AYURVEDIC & PHYTOCHEMICAL CARD (USED IN BOTH UI & HTML REPORTS) ---
 def generate_ayurvedic_card(data, is_streamlit=True):
     if not data:
         return ""
@@ -1081,11 +1082,15 @@ def generate_ayurvedic_card(data, is_streamlit=True):
         <h4 style="margin: 5px 0; color: #388e3c;"><i>{data['Scientific Name']}</i> | Family: {data['Family']}</h4>
         <h5 style="margin: 5px 0; color: #555;"><b>Medicinal Activity:</b> {data['Medicinal Activity']}</h5>
         <hr style="border: 0; border-top: 1px solid #ccc; margin: 15px 0;">
-        <p style="font-size: 15px; color: #333;"><b>Ayurvedic Note:</b> {data['Sanskrit Shloka (Bhavaprakasha Nighantu)']}</p>
-        <p style="font-size: 14px; color: #555;"><b>Evidence:</b> <i>{data['Roman Transliteration']}</i> | <b>Profile:</b> {data['Dravyaguna Profile (Rasa/Virya/Vipaka)']}</p>
-        <p style="font-size: 14px; color: #555;"><b>Mechanism:</b> {data['Classical Karma (Action)']}</p>
+        <p style="font-size: 16px; color: #333;"><b>Sanskrit / Traditional Note:</b><br><span style="font-family: serif; font-size: 18px;">{data['Sanskrit Shloka (Bhavaprakasha Nighantu)']}</span></p>
+        <p style="font-size: 14px; color: #555;"><b>Pronunciation / Evidence:</b> <i>{data['Roman Transliteration']}</i></p>
+        <p style="font-size: 14px; color: #555;"><b>Meaning / Context:</b> This classical verse highlights the properties mapped to the {data['Classical Karma (Action)']} and {data['Medicinal Activity']} profile.</p>
+        <p style="font-size: 14px; color: #555;"><b>Dravyaguna Profile / CID:</b> {data['Dravyaguna Profile (Rasa/Virya/Vipaka)']}</p>
+        <p style="font-size: 14px; color: #555;"><b>Classical Karma (Action):</b> {data['Classical Karma (Action)']}</p>
         <hr style="border: 0; border-top: 1px solid #ccc; margin: 15px 0;">
-        <p style="font-size: 14px; color: #1e3c72; margin: 2px 0;"><b>Target Protein:</b> {data['Target Protein / Receptor Name']} | <b>Ligand:</b> {data['Phytochemical']}</p>
+        <p style="font-size: 14px; color: #1e3c72; margin: 2px 0;"><b>Target Protein:</b> {data['Target Protein / Receptor Name']}</p>
+        <p style="font-size: 14px; color: #1e3c72; margin: 2px 0;"><b>Ligand (Phytochemical):</b> {data['Phytochemical']}</p>
+        <p style="font-size: 14px; color: #1e3c72; margin: 2px 0; word-break: break-all;"><b>Canonical SMILES:</b> {data['Canonical SMILES']}</p>
     </div>
     """
 
@@ -1129,7 +1134,7 @@ def build_comprehensive_html_report(meta, adme_p, adme_v, variant_row, iupac, sh
         col = "yellow" if "Hydrogen" in i["Interaction Type"] else "cyan"
         int_js2 += f"v2.addCylinder({{start:{{x:{i['r_coord'][0]},y:{i['r_coord'][1]},z:{i['r_coord'][2]}}},end:{{x:{i['l_coord'][0]},y:{i['l_coord'][1]},z:{i['l_coord'][2]}}},radius:0.07,color:'{col}',dashed:true}});\n"
 
-    # Build Phase 5: All 15 MD Charts + Technical & Simple Conclusions
+    # Phase 5: All 15 MD Charts + Technical & Simple Conclusions
     md_html_section = ""
     if md_bundle and md_bundle.get("items"):
         cards_html = ""
@@ -1195,8 +1200,10 @@ def build_comprehensive_html_report(meta, adme_p, adme_v, variant_row, iupac, sh
             <div class="meta-grid">
                 <div><strong>Target Protein:</strong> {meta['name']} ({meta['id']})</div>
                 <div><strong>Resolution:</strong> {meta['res']} | <strong>Cofactors:</strong> {active_retained_ions}</div>
+                <div><strong>Lead Phytochemical (SMILES):</strong> <span style="word-break:break-all; font-family:monospace;">{smiles_cache}</span></div>
                 <div><strong>Grid Strategy:</strong> {grid_strategy}</div>
                 <div><strong>Grid Box:</strong> ({grid_params['cx']}, {grid_params['cy']}, {grid_params['cz']}) | {grid_params['sx']}×{grid_params['sy']}×{grid_params['sz']} Å</div>
+                <div><strong>Search Exhaustiveness:</strong> {grid_params['exh']}</div>
             </div>
 
             <h2>2. Baseline Docking Results (Phase 1)</h2>
@@ -1335,6 +1342,7 @@ if st.button("🔄 Reset Entire Environment", type="secondary", use_container_wi
         del st.session_state[key]
     safe_rerun()
 
+# Render full Ayurvedic & Phytochemical Card immediately after selection
 if st.session_state.selected_tree_data and st.session_state.target_ready and st.session_state.ligand_ready:
     st.markdown(generate_ayurvedic_card(st.session_state.selected_tree_data, is_streamlit=True), unsafe_allow_html=True)
 
@@ -1397,7 +1405,13 @@ with col_params:
                 st.session_state.smiles_cache = smiles
                 with open(ws_path("ligand.pdbqt"), "r") as f:
                     st.session_state.serialized_ligand_block = f.read()
-                st.session_state.ligand_summary_text = f"**Phytochemical:** {target_row['Phytochemical']} | **Formula:** {pub_data['formula']} | **MW:** {pub_data['mw']}"
+                st.session_state.ligand_summary_text = (
+                    f"**Phytochemical Identifier:** {target_row['Phytochemical']} | **Formula:** {pub_data['formula']} | **MW:** {pub_data['mw']}\n\n"
+                    f"> **Phytochemical Mapping Matrix:**\n"
+                    f"> * **Ayurvedic Profile:** {target_row['Sanskrit Shloka (Bhavaprakasha Nighantu)']}\n"
+                    f"> * **Pharmacology / Priority:** {target_row['Dravyaguna Profile (Rasa/Virya/Vipaka)']}\n"
+                    f"> * **Target Mechanism:** {target_row['Classical Karma (Action)']}"
+                )
             else:
                 st.error(f"Ligand Conversion Error: {msg}")
 
@@ -1420,6 +1434,12 @@ with col_params:
                 if ok:
                     st.session_state.active_retained_ions = ", ".join(selected_hets) if selected_hets else "None (Fully Stripped)"
                     st.success(f"Receptor rebuilt! Retained: {st.session_state.active_retained_ions}")
+
+        meta = extract_pdb_metadata(st.session_state.local_target_path, st.session_state.pdb_id_display)
+        st.markdown(f"> **Protein Summary Profile:** \n> * **Protein Name:** **{st.session_state.protein_name}** \n> * **Title:** {meta['title']} \n> * **PDB ID:** `{st.session_state.pdb_id_display}` | **Classification:** {meta['class']} \n> * **Resolution:** **{meta['res']}**")
+
+    if st.session_state.ligand_ready:
+        st.markdown(f"> **Ligand Metric Summary Profile:** \n> {st.session_state.ligand_summary_text}")
 
     st.subheader("3. Smart Cavity & Bound Site Finder")
     if st.session_state.target_ready and os.path.exists(ws_path("protein.pdbqt")):
